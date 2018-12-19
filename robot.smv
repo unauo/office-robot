@@ -1,0 +1,233 @@
+MODULE office
+	VAR
+		office_button: {on, blinking, off};
+		robot_button: boolean;
+	ASSIGN
+		init(office_button) := off;
+		init(robot_button) := FALSE;
+
+-- let's give all the buttons to robot to control:
+MODULE robot(roB1,roB2,roB3,offB1,offB2,offB3)
+
+	VAR
+		location: {at1, btw12, at2, btw23, at3};
+		lid: {open, closed};
+		moving: boolean;
+		direction: {forward, backward};
+		sensor: boolean;
+		-- counter for the sensor & lid coordination:
+		counter: 0..2;
+
+	ASSIGN
+		init(counter) := 0;
+		init(location) := at1;
+		init(lid) := closed;
+		init(moving) := FALSE;
+		init(sensor) := FALSE;
+		-- no initial direction, but can also be "forward" since we start at "at1".
+		next(moving) := 
+			case
+				-- if none of the offices are calling the robot, no movement should occur.
+				!(roB1)&!(roB2)&!(roB3) : FALSE;
+				-- if lid is open, robot should not move.
+				(lid=open) : FALSE;
+				-- conditions for stopping in front of an office:
+				(roB2)&(location=btw12)&(direction=forward) : FALSE;
+				(roB3)&(location=btw23)&(direction=forward) : FALSE;
+				(roB1)&(location=btw12)&(direction=backward) : FALSE;
+				(roB2)&(location=btw23)&(direction=backward) : FALSE;
+				(roB1)&(location=at1) : FALSE;
+				(roB2)&(location=at2) : FALSE;
+				(roB3)&(location=at3) : FALSE;
+				TRUE : TRUE;
+			esac;
+
+		next(location):=
+			case
+				-- cases with only one direction to go:
+				(location=at1)&(moving) : btw12;
+				(location=at3)&(moving) : btw23;
+				-- cases with two possible directions:
+				(location=at2)&(moving)&(direction=forward) : btw23;
+				(location=at2)&(moving)&(direction=backward) : btw12;
+				(location=btw12)&(moving)&(direction=forward) : at2;
+				(location=btw12)&(moving)&(direction=backward) : at1;
+				(location=btw23)&(moving)&(direction=backward) : at2;
+				(location=btw23)&(moving)&(direction=forward) : at3;
+				TRUE : location;
+			esac;
+
+	  	next(direction):=
+	  		case
+	  			-- cases on direction change
+				(location=at1)&(roB2) : forward;
+				(location=at1)&(roB3) : forward;
+				(location=at3)&(roB2) : backward;
+				(location=at3)&(roB1) : backward;
+				-- in all other cases, robot does not change its direction. this way when it is at office 2, it can sometimes go to office 1 and sometimes go to office 3.
+				TRUE : direction;
+			esac;
+
+		next(counter) :=
+			case 
+				(counter=1)&(!sensor) : 2;
+				(counter=0)&(!sensor) : 1;
+				(sensor) : 0;
+				TRUE : counter;
+			esac;
+		next(sensor) := 
+			case
+				(lid=closed) : FALSE;
+				TRUE : sensor;
+			esac;
+
+
+		next(lid):= 	
+			case
+				(lid=open)&(counter=2): closed;
+				-- this is the condition where on the next state, lid will be open for office1:
+				(lid=closed)&(roB1)&(location=at1): open;
+				-- this is the condition where on the next state, lid will be open for office2:
+				(lid=closed)&(roB2)&(location=at2): open;
+				-- this is the condition where on the next state, lid will be open for office3:
+				(lid=closed)&(roB3)&(location=at3): open;
+				TRUE: lid;
+			esac;
+
+		next(offB1) := 	
+			case
+				-- this is the condition where on the next state, lid will be open for office1:
+				(lid=closed)&(roB1)&(location=at1): off;
+				-- if on the next state the robot will stop but not on office1, button should be on:
+				(moving)&(location=btw12)&(direction=backward): on;
+				(moving)&(location=btw23)&(direction=backward): on;
+				-- otherwise if robot keeps moving in some direction:
+				(moving) : blinking;
+				TRUE : offB1;
+			esac;
+
+		next(offB2) := 	
+			case
+				-- this is the condition where on the next state, lid will be open for office2:
+				(lid=closed)&(roB2)&(location=at2): off;
+				-- if on the next state the robot will stop but not on office2, button should be on:
+				(moving)&(location=btw12)&(direction=forward): on;
+				(moving)&(location=btw23)&(direction=backward): on;
+				-- otherwise if robot keeps moving in some direction:
+				(moving) : blinking;
+				TRUE : offB2;
+			esac;
+
+		next(offB3) := 	
+			case
+				-- this is the condition where on the next state, lid will be open for office3:
+				(lid=closed) & (roB3) & (location=at3): off;
+				-- if on the next state the robot will stop but not on office3, button should be on:
+				(moving)&(location=btw23)&(direction=forward): on;
+				(moving)&(location=btw12)&(direction=forward): on;
+				-- otherwise if robot keeps moving in some direction:
+				(moving) : blinking;
+				TRUE : offB3;
+			esac;
+
+		-- off conditions for robot_buttons:
+		next(roB1) :=
+			case
+				(location=at1)&(roB1)&(lid=open) : FALSE;
+				TRUE : roB1;
+			esac; 
+		next(roB2) := 	
+			case
+				(location=at2)&(roB2)&(lid=open) : FALSE;
+				TRUE : roB2;
+			esac;
+		next(roB3) := 
+			case
+				(location=at3)&(roB3)&(lid=open) : FALSE;
+				TRUE : roB3;
+			esac;
+
+	-- spec 5:
+	FAIRNESS ((lid=open)&!(sensor));
+	-- spec 6:
+	FAIRNESS ((roB1)->(location=at1));
+	FAIRNESS ((roB2)->(location=at2));
+	FAIRNESS ((roB3)->(location=at3));
+	-- general fairness between office robot calls:
+	FAIRNESS (roB1);
+	FAIRNESS (roB2);
+	FAIRNESS (roB3);
+
+MODULE main
+	VAR
+		office1: office;
+		office2: office;
+		office3: office;
+		robot: robot(office1.robot_button,office2.robot_button,office3.robot_button,office1.office_button,office2.office_button,office3.office_button);
+
+	-- some of the specifications in the pdf:
+
+	-- spec 1:
+	LTLSPEC G((office1.office_button!=off)->(office1.office_button!=off)U(robot.location=at1));
+	LTLSPEC G((office2.office_button!=off)->(office2.office_button!=off)U(robot.location=at2));
+	LTLSPEC G((office3.office_button!=off)->(office3.office_button!=off)U(robot.location=at3));
+	-- spec 2:
+	LTLSPEC G(((robot.lid=closed)&(X(robot.lid=open)))->X((robot.lid=open)&X((robot.lid=open)&X(robot.lid=open))));
+	-- spec 3:
+	LTLSPEC G((office1.office_button!=off)->((robot.moving)->(office1.office_button=blinking)));
+	LTLSPEC G((office1.office_button!=off)->(!(robot.moving)->(office1.office_button=on)));
+	LTLSPEC G((office2.office_button!=off)->((robot.moving)->(office2.office_button=blinking)));
+	LTLSPEC G((office2.office_button!=off)->(!(robot.moving)->(office2.office_button=on)));
+	LTLSPEC G((office3.office_button!=off)->((robot.moving)->(office3.office_button=blinking)));
+	LTLSPEC G((office3.office_button!=off)->(!(robot.moving)->(office3.office_button=on)));
+	-- spec 4:
+	LTLSPEC G((robot.lid=open)->((robot.lid=open)U((!robot.sensor)&X(!robot.sensor))));
+	-- spec 5:
+	LTLSPEC G(F((robot.lid=open)&((!robot.sensor)&X(!robot.sensor))));
+	-- spec 6:
+	LTLSPEC G((office1.robot_button)->F(robot.location=at1));
+	LTLSPEC G((office2.robot_button)->F(robot.location=at2));
+	LTLSPEC G((office3.robot_button)->F(robot.location=at3));
+	-- spec 7:
+	LTLSPEC G((robot.lid=open)&(robot.location=at1)->!(robot.moving)&(office1.office_button=off)&!(office1.robot_button));
+	LTLSPEC G((robot.lid=open)&(robot.location=at2)->!(robot.moving)&(office2.office_button=off)&!(office2.robot_button));
+	LTLSPEC G((robot.lid=open)&(robot.location=at3)->!(robot.moving)&(office3.office_button=off)&!(office3.robot_button));
+	-- spec 8:
+	LTLSPEC G(((robot.lid=open)&X(robot.lid=closed))->(X((!robot.moving)&X(!robot.moving))));
+	-- spec 9:
+	LTLSPEC G((robot.location=btw12)&(robot.direction=forward)&(robot.moving)->X(robot.location=at3));
+	LTLSPEC G((robot.location=btw12)&(robot.direction=backward)&(robot.moving)->X(robot.location=at1));
+	LTLSPEC G((robot.location=btw23)&(robot.direction=forward)&(robot.moving)->X(robot.location=at3));
+	LTLSPEC G((robot.location=btw23)&(robot.direction=backward)&(robot.moving)->X(robot.location=at2));
+	-- spec 10:
+	LTLSPEC G(!((robot.sensor)&(robot.lid=closed)));
+	-- spec 11:
+	LTLSPEC G((!(office1.robot_button)&!(office2.robot_button)&!(office3.robot_button))->!(robot.moving));
+	-- spec 12:
+	LTLSPEC G((robot.location=btw12)&(robot.direction=forward)->X(robot.direction=forward));
+	LTLSPEC G((robot.location=btw12)&(robot.direction=backward)->X(robot.direction=backward));
+	LTLSPEC G((robot.location=btw23)&(robot.direction=forward)->X(robot.direction=forward));
+	LTLSPEC G((robot.location=btw23)&(robot.direction=backward)->X(robot.direction=backward));
+	-- spec 13:
+	LTLSPEC G((robot.location=at2)&(robot.direction=forward)->X(robot.direction=forward));
+	LTLSPEC G((robot.location=at2)&(robot.direction=backward)->X(robot.direction=backward));
+	-- spec 14:
+	LTLSPEC G((robot.location=at1)&(office1.robot_button)->X(robot.lid=open));
+	LTLSPEC G((robot.location=at2)&(office2.robot_button)->X(robot.lid=open));
+	LTLSPEC G((robot.location=at3)&(office3.robot_button)->X(robot.lid=open));
+	-- spec 15 & 16:
+	LTLSPEC F((office1.robot_button)&(office3.robot_button)&(robot.location=at2)->X(robot.location=btw12));
+	LTLSPEC F((office1.robot_button)&(office3.robot_button)&(robot.location=at2)->X(robot.location=btw23));
+	-- extra spec:
+	
+
+
+
+	
+
+	
+
+	
+
+
+
